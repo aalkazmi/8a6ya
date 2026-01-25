@@ -1,7 +1,33 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { PlusCircle, Trash2, Users, DollarSign, LogIn, Share2, Copy, Check, RefreshCw } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import{ 
+  collection, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  getDocs
+} from 'firebase/firestore';
 
+// Initialize Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyBOg9OljjLnmOkCrB7GLXUFoOY3ArMf6ig",
+  authDomain: "a6ya-47c4a.firebaseapp.com",
+  projectId: "a6ya-47c4a",
+  storageBucket: "a6ya-47c4a.firebasestorage.app",
+  messagingSenderId: "718401213991",
+  appId: "1:718401213991:web:fa8f6fc53bb46dd3eea002"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 export default function ExpenseSplitter() {
   const [groupId, setGroupId] = useState(null);
   const [groupIdInput, setGroupIdInput] = useState('');
@@ -21,20 +47,52 @@ export default function ExpenseSplitter() {
   const [language, setLanguage] = useState('en');
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedGroupId = localStorage.getItem('currentGroupId');
-      const savedUserName = localStorage.getItem('currentUserName');
-      const savedLanguage = localStorage.getItem('language') || 'en';
-      if (savedGroupId) setGroupId(savedGroupId);
-      if (savedUserName) setUserName(savedUserName);
-      setLanguage(savedLanguage);
-    }
+    const loadUserData = async () => {
+      if (typeof window !== 'undefined') {
+        try {
+          // Load basic user data
+          const groupIdDoc = await getDoc(doc(db, 'storage', 'currentGroupId'));
+          const userNameDoc = await getDoc(doc(db, 'storage', 'currentUserName'));
+          const languageDoc = await getDoc(doc(db, 'storage', 'language'));
+
+          const savedGroupId = groupIdDoc.exists() ? groupIdDoc.data().value : null;
+          const savedUserName = userNameDoc.exists() ? userNameDoc.data().value : null;
+          const savedLanguage = languageDoc.exists() ? languageDoc.data().value : 'en';
+
+          if (savedGroupId) setGroupId(savedGroupId);
+          if (savedUserName) setUserName(savedUserName);
+          setLanguage(savedLanguage);
+
+          // Load group data if groupId exists
+          if (savedGroupId) {
+            const peopleDoc = await getDoc(doc(db, 'storage', `group-${savedGroupId}-people`));
+            const expensesDoc = await getDoc(doc(db, 'storage', `group-${savedGroupId}-expenses`));
+
+            if (peopleDoc.exists()) {
+              setPeople(peopleDoc.data().value || []);
+            }
+
+            if (expensesDoc.exists()) {
+              setExpenses(expensesDoc.data().value || []);
+            }
+          }
+        } catch (error) {
+          console.error('Error loading user data from Firestore:', error);
+        }
+      }
+    };
+
+    loadUserData();
   }, []);
 
-  const changeLanguage = (lang) => {
+  const changeLanguage = async (lang) => {
     setLanguage(lang);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('language', lang);
+      try {
+        await setDoc(doc(db, 'storage', 'language'), { value: lang });
+      } catch (error) {
+        console.error('Error saving language to Firestore:', error);
+      }
     }
   };
 
@@ -113,7 +171,7 @@ export default function ExpenseSplitter() {
     return text;
   };
 
-  const createGroup = () => {
+  const createGroup = async () => {
     if (!userName.trim()) {
       setMessage(getText('pleaseEnterName'));
       setTimeout(() => setMessage(''), 3000);
@@ -123,20 +181,26 @@ export default function ExpenseSplitter() {
     const initialPerson = { id: Date.now(), name: userName.trim() };
     const initialPeople = [initialPerson];
     
-    setGroupId(newGroupId);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('currentGroupId', newGroupId);
-      localStorage.setItem('currentUserName', userName.trim());
-      localStorage.setItem(`group-${newGroupId}-people`, JSON.stringify(initialPeople));
-      localStorage.setItem(`group-${newGroupId}-expenses`, JSON.stringify([]));
+    try {
+      setGroupId(newGroupId);
+      if (typeof window !== 'undefined') {
+        await setDoc(doc(db, 'storage', 'currentGroupId'), { value: newGroupId });
+        await setDoc(doc(db, 'storage', 'currentUserName'), { value: userName.trim() });
+        await setDoc(doc(db, 'storage', `group-${newGroupId}-people`), { value: initialPeople });
+        await setDoc(doc(db, 'storage', `group-${newGroupId}-expenses`), { value: [] });
+      }
+      setPeople(initialPeople);
+      setExpenses([]);
+      setMessage(getText('groupCreated', { code: newGroupId }));
+      setTimeout(() => setMessage(''), 5000);
+    } catch (error) {
+      console.error('Error creating group in Firestore:', error);
+      setMessage('Error creating group. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
     }
-    setPeople(initialPeople);
-    setExpenses([]);
-    setMessage(getText('groupCreated', { code: newGroupId }));
-    setTimeout(() => setMessage(''), 5000);
   };
 
-  const joinGroup = () => {
+  const joinGroup = async () => {
     if (!userName.trim() || !groupIdInput.trim()) {
       setMessage(getText('pleaseFillFields'));
       setTimeout(() => setMessage(''), 3000);
@@ -145,40 +209,53 @@ export default function ExpenseSplitter() {
     const code = groupIdInput.trim().toUpperCase();
     
     if (typeof window !== 'undefined') {
-      const savedPeople = localStorage.getItem(`group-${code}-people`);
-      const savedExpenses = localStorage.getItem(`group-${code}-expenses`);
-      
-      if (!savedPeople) {
-        setMessage('Group not found');
+      try {
+        const peopleDoc = await getDoc(doc(db, 'storage', `group-${code}-people`));
+        const expensesDoc = await getDoc(doc(db, 'storage', `group-${code}-expenses`));
+        
+        if (!peopleDoc.exists()) {
+          setMessage('Group not found');
+          setTimeout(() => setMessage(''), 3000);
+          return;
+        }
+
+        const existingPeople = peopleDoc.data().value || [];
+        const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
+        
+        if (!nameExists) {
+          const newPerson = { id: Date.now(), name: userName.trim() };
+          const updatedPeople = [...existingPeople, newPerson];
+          await setDoc(doc(db, 'storage', `group-${code}-people`), { value: updatedPeople });
+          setPeople(updatedPeople);
+        } else {
+          setPeople(existingPeople);
+        }
+
+        await setDoc(doc(db, 'storage', 'currentGroupId'), { value: code });
+        await setDoc(doc(db, 'storage', 'currentUserName'), { value: userName.trim() });
+        
+        setGroupId(code);
+        setExpenses(expensesDoc.exists() ? expensesDoc.data().value || [] : []);
+      } catch (error) {
+        console.error('Error joining group from Firestore:', error);
+        setMessage('Error joining group. Please try again.');
         setTimeout(() => setMessage(''), 3000);
-        return;
       }
-      
-      const existingPeople = JSON.parse(savedPeople);
-      const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
-      
-      if (!nameExists) {
-        const newPerson = { id: Date.now(), name: userName.trim() };
-        const updatedPeople = [...existingPeople, newPerson];
-        localStorage.setItem(`group-${code}-people`, JSON.stringify(updatedPeople));
-      }
-      
-      setGroupId(code);
-      localStorage.setItem('currentGroupId', code);
-      localStorage.setItem('currentUserName', userName.trim());
-      setPeople(JSON.parse(localStorage.getItem(`group-${code}-people`)));
-      setExpenses(savedExpenses ? JSON.parse(savedExpenses) : []);
     }
   };
 
-  const leaveGroup = () => {
+  const leaveGroup = async () => {
     const updatedPeople = people.filter(p => p.name.toLowerCase() !== userName.toLowerCase());
     if (typeof window !== 'undefined') {
-      if (updatedPeople.length > 0) {
-        localStorage.setItem(`group-${groupId}-people`, JSON.stringify(updatedPeople));
+      try {
+        if (updatedPeople.length > 0) {
+          await setDoc(doc(db, 'storage', `group-${groupId}-people`), { value: updatedPeople });
+        }
+        await deleteDoc(doc(db, 'storage', 'currentGroupId'));
+        await deleteDoc(doc(db, 'storage', 'currentUserName'));
+      } catch (error) {
+        console.error('Error leaving group in Firestore:', error);
       }
-      localStorage.removeItem('currentGroupId');
-      localStorage.removeItem('currentUserName');
     }
     setGroupId(null);
     setPeople([]);
@@ -193,61 +270,79 @@ export default function ExpenseSplitter() {
     }
   };
 
-  const addPerson = () => {
+  const addPerson = async () => {
     if (newPersonName.trim()) {
-      const newPerson = { id: Date.now(), name: newPersonName.trim() };
-      const updatedPeople = [...people, newPerson];
-      setPeople(updatedPeople);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`group-${groupId}-people`, JSON.stringify(updatedPeople));
+      try {
+        const newPerson = { id: Date.now(), name: newPersonName.trim() };
+        const updatedPeople = [...people, newPerson];
+        setPeople(updatedPeople);
+        if (typeof window !== 'undefined') {
+          await setDoc(doc(db, 'storage', `group-${groupId}-people`), { value: updatedPeople });
+        }
+        setNewPersonName('');
+      } catch (error) {
+        console.error('Error adding person to Firestore:', error);
       }
-      setNewPersonName('');
     }
   };
 
-  const removePerson = (id) => {
+  const removePerson = async (id) => {
     const updatedPeople = people.filter(p => p.id !== id);
     setPeople(updatedPeople);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`group-${groupId}-people`, JSON.stringify(updatedPeople));
+      try {
+        await setDoc(doc(db, 'storage', `group-${groupId}-people`), { value: updatedPeople });
+      } catch (error) {
+        console.error('Error removing person from Firestore:', error);
+      }
     }
   };
 
-  const handleAddExpense = () => {
+  const handleAddExpense = async () => {
     if (!expenseDescription.trim() || !expenseAmount || !expensePaidBy || expenseSplitAmong.length === 0) {
       setMessage(getText('pleaseFillFields'));
       setTimeout(() => setMessage(''), 3000);
       return;
     }
-    const newExpense = {
-      id: Date.now(),
-      description: expenseDescription.trim(),
-      amount: parseFloat(expenseAmount),
-      paidBy: parseInt(expensePaidBy),
-      paidByName: people.find(p => p.id === parseInt(expensePaidBy))?.name,
-      splitAmong: expenseSplitAmong.map(id => parseInt(id)),
-      splitAmongNames: expenseSplitAmong.map(id => ({
-        id: parseInt(id),
-        name: people.find(p => p.id === parseInt(id))?.name
-      })),
-      addedBy: userName
-    };
-    const updatedExpenses = [...expenses, newExpense];
-    setExpenses(updatedExpenses);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`group-${groupId}-expenses`, JSON.stringify(updatedExpenses));
+    try {
+      const newExpense = {
+        id: Date.now(),
+        description: expenseDescription.trim(),
+        amount: parseFloat(expenseAmount),
+        paidBy: parseInt(expensePaidBy),
+        paidByName: people.find(p => p.id === parseInt(expensePaidBy))?.name,
+        splitAmong: expenseSplitAmong.map(id => parseInt(id)),
+        splitAmongNames: expenseSplitAmong.map(id => ({
+          id: parseInt(id),
+          name: people.find(p => p.id === parseInt(id))?.name
+        })),
+        addedBy: userName
+      };
+      const updatedExpenses = [...expenses, newExpense];
+      setExpenses(updatedExpenses);
+      if (typeof window !== 'undefined') {
+        await setDoc(doc(db, 'storage', `group-${groupId}-expenses`), { value: updatedExpenses });
+      }
+      setExpenseDescription('');
+      setExpenseAmount('');
+      setExpensePaidBy('');
+      setExpenseSplitAmong([]);
+    } catch (error) {
+      console.error('Error adding expense to Firestore:', error);
+      setMessage('Error adding expense. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
     }
-    setExpenseDescription('');
-    setExpenseAmount('');
-    setExpensePaidBy('');
-    setExpenseSplitAmong([]);
   };
 
-  const removeExpense = (id) => {
+  const removeExpense = async (id) => {
     const updatedExpenses = expenses.filter(e => e.id !== id);
     setExpenses(updatedExpenses);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`group-${groupId}-expenses`, JSON.stringify(updatedExpenses));
+      try {
+        await setDoc(doc(db, 'storage', `group-${groupId}-expenses`), { value: updatedExpenses });
+      } catch (error) {
+        console.error('Error removing expense from Firestore:', error);
+      }
     }
   };
 
