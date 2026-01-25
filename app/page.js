@@ -51,12 +51,10 @@ export default function ExpenseSplitter() {
       if (typeof window !== 'undefined') {
         try {
           // Load basic user data
-          const groupIdDoc = await getDoc(doc(db, 'storage', 'currentGroupId'));
-          const userNameDoc = await getDoc(doc(db, 'storage', 'currentUserName'));
+          // Device-specific session data should come from localStorage
+          const savedGroupId = localStorage.getItem('currentGroupId');
+          const savedUserName = localStorage.getItem('currentUserName');
           const languageDoc = await getDoc(doc(db, 'storage', 'language'));
-
-          const savedGroupId = groupIdDoc.exists() ? groupIdDoc.data().value : null;
-          const savedUserName = userNameDoc.exists() ? userNameDoc.data().value : null;
           const savedLanguage = languageDoc.exists() ? languageDoc.data().value : 'en';
 
           if (savedGroupId) setGroupId(savedGroupId);
@@ -181,11 +179,11 @@ export default function ExpenseSplitter() {
     const initialPerson = { id: Date.now(), name: userName.trim() };
     const initialPeople = [initialPerson];
     
-    try {
+      try {
       setGroupId(newGroupId);
       if (typeof window !== 'undefined') {
-        await setDoc(doc(db, 'storage', 'currentGroupId'), { value: newGroupId });
-        await setDoc(doc(db, 'storage', 'currentUserName'), { value: userName.trim() });
+        localStorage.setItem('currentGroupId', newGroupId);
+        localStorage.setItem('currentUserName', userName.trim());
         await setDoc(doc(db, 'storage', `group-${newGroupId}-people`), { value: initialPeople });
         await setDoc(doc(db, 'storage', `group-${newGroupId}-expenses`), { value: [] });
       }
@@ -208,40 +206,40 @@ export default function ExpenseSplitter() {
     }
     const code = groupIdInput.trim().toUpperCase();
     
-    if (typeof window !== 'undefined') {
-      try {
-        const peopleDoc = await getDoc(doc(db, 'storage', `group-${code}-people`));
-        const expensesDoc = await getDoc(doc(db, 'storage', `group-${code}-expenses`));
-        
-        if (!peopleDoc.exists()) {
-          setMessage('Group not found');
+        if (typeof window !== 'undefined') {
+        try {
+          const peopleDoc = await getDoc(doc(db, 'storage', `group-${code}-people`));
+          const expensesDoc = await getDoc(doc(db, 'storage', `group-${code}-expenses`));
+          
+          if (!peopleDoc.exists()) {
+            setMessage('Group not found');
+            setTimeout(() => setMessage(''), 3000);
+            return;
+          }
+
+          const existingPeople = peopleDoc.data().value || [];
+          const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
+          
+          if (!nameExists) {
+            const newPerson = { id: Date.now(), name: userName.trim() };
+            const updatedPeople = [...existingPeople, newPerson];
+            await setDoc(doc(db, 'storage', `group-${code}-people`), { value: updatedPeople });
+            setPeople(updatedPeople);
+          } else {
+            setPeople(existingPeople);
+          }
+
+          localStorage.setItem('currentGroupId', code);
+          localStorage.setItem('currentUserName', userName.trim());
+          
+          setGroupId(code);
+          setExpenses(expensesDoc.exists() ? expensesDoc.data().value || [] : []);
+        } catch (error) {
+          console.error('Error joining group from Firestore:', error);
+          setMessage('Error joining group. Please try again.');
           setTimeout(() => setMessage(''), 3000);
-          return;
         }
-
-        const existingPeople = peopleDoc.data().value || [];
-        const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
-        
-        if (!nameExists) {
-          const newPerson = { id: Date.now(), name: userName.trim() };
-          const updatedPeople = [...existingPeople, newPerson];
-          await setDoc(doc(db, 'storage', `group-${code}-people`), { value: updatedPeople });
-          setPeople(updatedPeople);
-        } else {
-          setPeople(existingPeople);
-        }
-
-        await setDoc(doc(db, 'storage', 'currentGroupId'), { value: code });
-        await setDoc(doc(db, 'storage', 'currentUserName'), { value: userName.trim() });
-        
-        setGroupId(code);
-        setExpenses(expensesDoc.exists() ? expensesDoc.data().value || [] : []);
-      } catch (error) {
-        console.error('Error joining group from Firestore:', error);
-        setMessage('Error joining group. Please try again.');
-        setTimeout(() => setMessage(''), 3000);
       }
-    }
   };
 
   const leaveGroup = async () => {
@@ -251,8 +249,8 @@ export default function ExpenseSplitter() {
         if (updatedPeople.length > 0) {
           await setDoc(doc(db, 'storage', `group-${groupId}-people`), { value: updatedPeople });
         }
-        await deleteDoc(doc(db, 'storage', 'currentGroupId'));
-        await deleteDoc(doc(db, 'storage', 'currentUserName'));
+        localStorage.removeItem('currentGroupId');
+        localStorage.removeItem('currentUserName');
       } catch (error) {
         console.error('Error leaving group in Firestore:', error);
       }
