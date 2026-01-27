@@ -671,7 +671,7 @@ export default function ExpenseSplitter() {
                       {!person && <span className="text-xs text-gray-400 ml-2">({getText('left')})</span>}
                     </span>
                     <span className={balance > 0 ? 'text-gray-900' : balance < 0 ? 'text-gray-500' : 'text-gray-400'}>
-                      {balance > 0 ? `+$${balance.toFixed(2)}` : balance < 0 ? `$${Math.abs(balance).toFixed(2)}` : '$0.00'}
+                      {balance > 0 ? `+$${balance.toFixed(2)}` : balance < 0 ? `-$${Math.abs(balance).toFixed(2)}` : '$0.00'}
                     </span>
                   </div>
                 );
