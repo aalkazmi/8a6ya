@@ -34,6 +34,7 @@ export default function ExpenseSplitter() {
   const [userName, setUserName] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sharedPersonId, setSharedPersonId] = useState(null);
   
   const [people, setPeople] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -126,6 +127,8 @@ export default function ExpenseSplitter() {
       pleaseEnterName: 'Please enter your name',
       pleaseFillFields: 'Please fill all fields',
       groupCreated: 'Group created: {{code}}',
+      settleUp: 'Settle up',
+      copied: 'Copied!',
     },
     ar: {
       appName: '8a6ya',
@@ -158,6 +161,8 @@ export default function ExpenseSplitter() {
       pleaseEnterName: 'الرجاء إدخال اسمك',
       pleaseFillFields: 'الرجاء ملء جميع الحقول',
       groupCreated: 'تم إنشاء المجموعة: {{code}}',
+      settleUp: 'تصفية الحساب',
+      copied: 'تم النسخ!',
     }
   };
 
@@ -167,6 +172,38 @@ export default function ExpenseSplitter() {
       text = text.replace(`{{${param}}}`, value);
     });
     return text;
+  };
+
+  const handleShareSettleUp = async (personName, amount, personId) => {
+    const message = `www.8a6ya.com Settle Up
+Hey ${personName}! 👋
+
+It seems like you have an unsettled balance of $${Math.abs(amount).toFixed(2)} in 8a6ya.
+
+Let's settle up! 💸`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          text: message
+        });
+      } else {
+        await navigator.clipboard.writeText(message);
+        setSharedPersonId(personId);
+        setTimeout(() => setSharedPersonId(null), 2000);
+      }
+    } catch (error) {
+      // If share fails, try clipboard
+      if (error.name !== 'AbortError') {
+        try {
+          await navigator.clipboard.writeText(message);
+          setSharedPersonId(personId);
+          setTimeout(() => setSharedPersonId(null), 2000);
+        } catch (clipboardError) {
+          console.error('Error copying to clipboard:', clipboardError);
+        }
+      }
+    }
   };
 
   const createGroup = async () => {
@@ -670,9 +707,29 @@ export default function ExpenseSplitter() {
                       {personName}
                       {!person && <span className="text-xs text-gray-400 ml-2">({getText('left')})</span>}
                     </span>
-                    <span className={balance > 0 ? 'text-gray-900' : balance < 0 ? 'text-gray-500' : 'text-gray-400'}>
-                      {balance > 0 ? `+$${balance.toFixed(2)}` : balance < 0 ? `-$${Math.abs(balance).toFixed(2)}` : '$0.00'}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className={balance > 0 ? 'text-gray-900' : balance < 0 ? 'text-gray-500' : 'text-gray-400'}>
+                        {balance > 0 ? `+$${balance.toFixed(2)}` : balance < 0 ? `-$${Math.abs(balance).toFixed(2)}` : '$0.00'}
+                      </span>
+                      {balance < 0 && (
+                        <button
+                          onClick={() => handleShareSettleUp(personName, balance, parseInt(personId))}
+                          className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                        >
+                          {sharedPersonId === parseInt(personId) ? (
+                            <>
+                              <Check size={16} />
+                              <span>{getText('copied')}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Share2 size={16} />
+                              <span>{getText('settleUp')}</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
