@@ -3,7 +3,7 @@ import { getFirestore } from 'firebase/firestore';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBOg9OljjLnmOkCrB7GLXUFoOY3ArMf6ig",
+  apiKey: "AIzaSyBOg9OlijLnmOkCrB7GlXUFo0Y3ArMf6ig",
   authDomain: "a6ya-47c4a.firebaseapp.com",
   projectId: "a6ya-47c4a",
   storageBucket: "a6ya-47c4a.firebasestorage.app",
@@ -16,3 +16,6 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore
 export const db = getFirestore(app);
+
+// Export app instance for use with auth
+export const firebaseApp = app;
