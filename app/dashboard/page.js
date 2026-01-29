@@ -554,11 +554,11 @@ Let's settle up! 💸`;
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6 transition-colors" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="max-w-4xl mx-auto">
         <div className="bg-white dark:bg-gray-800 p-8 mb-8 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="flex justify-between items-start mb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 sm:gap-0">
             <div>
               <h1 className="text-3xl font-light text-gray-900 dark:text-white">{getText('appName')}</h1>
             </div>
-            <div className="flex gap-3 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <button
                 onClick={toggleTheme}
                 className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 transition"
@@ -573,10 +573,10 @@ Let's settle up! 💸`;
               </button>
               <button
                 onClick={copyGroupCode}
-                className="flex items-center gap-2 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-slate-100 px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition"
+                className="flex items-center gap-2 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-slate-100 px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition max-w-[160px] sm:max-w-none"
               >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                <span className="font-mono text-sm">{groupId}</span>
+                {copied ? <Check className="w-4 h-4 flex-shrink-0" /> : <Copy className="w-4 h-4 flex-shrink-0" />}
+                <span className="font-mono text-sm truncate">{groupId}</span>
               </button>
               <button
                 onClick={leaveGroup}
