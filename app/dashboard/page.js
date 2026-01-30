@@ -198,12 +198,15 @@ export default function ExpenseSplitter() {
     setRenameLoading(false);
   };
 
-  const handleCreateGroup = async () => {
+  const handleCreateGroup = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
     setModalLoading(true);
     setModalError('');
     try {
       const newGroupId = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const groupName = modalGroupName.trim() || `${userName.trim()}'s Group`;
+      const defaultGroupName = language === 'ar' ? `مجموعة ${userName.trim()}` : `${userName.trim()}'s Group`;
+      const groupName = modalGroupName.trim() || defaultGroupName;
       const currency = 'USD';
       const initialPerson = { id: Date.now().toString(), name: userName.trim() };
 
@@ -398,6 +401,9 @@ export default function ExpenseSplitter() {
       cancel: 'Cancel',
       nameRequired: 'Name is required',
       nameTooLong: 'Name is too long (max 40 characters)',
+      groupNameOptional: 'Group Name (Optional)',
+      create: 'Create',
+      creating: 'Creating...',
     },
     ar: {
       appName: '8a6ya',
@@ -439,6 +445,9 @@ export default function ExpenseSplitter() {
       cancel: 'إلغاء',
       nameRequired: 'الاسم مطلوب',
       nameTooLong: 'الاسم طويل جداً',
+      groupNameOptional: 'اسم المجموعة (اختياري)',
+      create: 'إنشاء',
+      creating: 'جاري الإنشاء...',
     }
   };
 
@@ -1192,7 +1201,7 @@ Let's settle up! 💸`;
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeModals}>
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Create new group</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">{getText('createNewGroup')}</h2>
             
             {modalError && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-400 rounded-md">
@@ -1202,32 +1211,39 @@ Let's settle up! 💸`;
 
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Group Name (Optional)
+                {getText('groupNameOptional')}
               </label>
               <input
                 type="text"
                 autoFocus
                 value={modalGroupName}
                 onChange={(e) => setModalGroupName(e.target.value)}
-                placeholder={`${userName}'s Group`}
+                placeholder={language === 'ar' ? `مجموعة ${userName}` : `${userName}'s Group`}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleCreateGroup();
+                  }
+                }}
               />
             </div>
 
             <div className="flex justify-end gap-3">
               <button
+                type="button"
                 onClick={closeModals}
                 className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
               >
-                Cancel
+                {getText('cancel')}
               </button>
               <button
+                type="button"
                 onClick={handleCreateGroup}
                 disabled={modalLoading}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
               >
-                {modalLoading ? 'Creating...' : 'Create'}
+                {modalLoading ? getText('creating') : getText('create')}
               </button>
             </div>
           </div>
