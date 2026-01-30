@@ -18,6 +18,7 @@ import{
   serverTimestamp
 } from 'firebase/firestore';
 import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFromDevice } from '../lib/device';
+import { CURRENCIES, getDefaultCurrency, formatAmount, getCurrencyByCode } from '../lib/currencies';
 export default function ExpenseSplitter() {
   const router = useRouter();
   const [initializing, setInitializing] = useState(true);
@@ -38,6 +39,8 @@ export default function ExpenseSplitter() {
   const [modalJoinCode, setModalJoinCode] = useState('');
   const [modalError, setModalError] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
+  const [modalCurrency, setModalCurrency] = useState('USD');
+  const [groupCurrency, setGroupCurrency] = useState('USD');
 
   // Rename Modal State
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -137,6 +140,7 @@ export default function ExpenseSplitter() {
           const data = groupDoc.data();
           groupName = data.name || groupName;
           currency = data.currency || currency;
+          setGroupCurrency(currency);
         } else {
           console.warn('Group metadata not found for:', groupId);
         }
@@ -176,6 +180,13 @@ export default function ExpenseSplitter() {
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
 
+  // Set default currency when create modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      setModalCurrency(getDefaultCurrency());
+    }
+  }, [showCreateModal]);
+
   const switchGroup = (groupCode) => {
     if (groupCode !== groupId) {
       setGroupId(groupCode);
@@ -191,6 +202,7 @@ export default function ExpenseSplitter() {
     setModalJoinCode('');
     setModalError('');
     setModalLoading(false);
+    setModalCurrency('USD');
     setShowRenameModal(false);
     setRenameGroupId(null);
     setRenameGroupName('');
@@ -207,7 +219,7 @@ export default function ExpenseSplitter() {
       const newGroupId = Math.random().toString(36).substring(2, 8).toUpperCase();
       const defaultGroupName = language === 'ar' ? `مجموعة ${userName.trim()}` : `${userName.trim()}'s Group`;
       const groupName = modalGroupName.trim() || defaultGroupName;
-      const currency = 'USD';
+      const currency = modalCurrency;
       const initialPerson = { id: Date.now().toString(), name: userName.trim() };
 
       // 1. Create group metadata
@@ -404,6 +416,10 @@ export default function ExpenseSplitter() {
       groupNameOptional: 'Group Name (Optional)',
       create: 'Create',
       creating: 'Creating...',
+      currency: 'Currency',
+      settleUpGreeting: 'Hey {{name}}! 👋',
+      settleUpMessage: 'It seems like you have an unsettled balance of {{amount}} in 8a6ya.',
+      settleUpCTA: "Let's settle up! 🤝",
     },
     ar: {
       appName: '8a6ya',
@@ -448,6 +464,10 @@ export default function ExpenseSplitter() {
       groupNameOptional: 'اسم المجموعة (اختياري)',
       create: 'إنشاء',
       creating: 'جاري الإنشاء...',
+      currency: 'العملة',
+      settleUpGreeting: 'مرحباً {{name}}! 👋',
+      settleUpMessage: 'يبدو أن لديك رصيد غير مسوّى بقيمة {{amount}} في 8a6ya.',
+      settleUpCTA: 'هيا نسوّي الحساب! 🤝',
     }
   };
 
@@ -460,12 +480,13 @@ export default function ExpenseSplitter() {
   };
 
   const handleShareSettleUp = async (personName, amount, personId) => {
-    const message = `www.8a6ya.com Settle Up
-Hey ${personName}! 👋
+    const formattedAmount = formatAmount(Math.abs(amount), groupCurrency);
+    const message = `www.8a6ya.com ${getText('settleUp')}
+${getText('settleUpGreeting', { name: personName })}
 
-It seems like you have an unsettled balance of $${Math.abs(amount).toFixed(2)} in 8a6ya.
+${getText('settleUpMessage', { amount: formattedAmount })}
 
-Let's settle up! 💸`;
+${getText('settleUpCTA')}`;
 
     try {
       if (navigator.share) {
@@ -647,6 +668,20 @@ Let's settle up! 💸`;
     }
   };
 
+  const handleAmountChange = (e) => {
+    let val = e.target.value;
+    
+    // Convert Arabic numerals to Western
+    val = val.replace(/[٠١٢٣٤٥٦٧٨٩]/g, d => d.charCodeAt(0) - 1632)
+             .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, d => d.charCodeAt(0) - 1776)
+             .replace(/٫/g, '.');
+
+    // Allow only numbers and one decimal point
+    if (val === '' || /^\d*\.?\d*$/.test(val)) {
+      setExpenseAmount(val);
+    }
+  };
+
   const handleAddExpense = async () => {
     if (!expenseDescription.trim() || !expenseAmount || !expensePaidBy) {
       setMessage(getText('pleaseFillFields'));
@@ -673,6 +708,7 @@ Let's settle up! 💸`;
         id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
         description: expenseDescription.trim(),
         amount: amountVal,
+        currency: groupCurrency || 'USD',
         paidBy: payerId,
         paidByName: payer ? payer.name : 'Unknown',
         splitAmong: expenseSplitAmong.map(String),
@@ -895,8 +931,11 @@ Let's settle up! 💸`;
                   onClick={() => setIsGroupMenuOpen(!isGroupMenuOpen)}
                   className="flex items-center gap-2 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-slate-100 px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition max-w-[200px] sm:max-w-xs"
                 >
-                  <span className="font-medium text-sm truncate">
+                  <span className="font-medium text-sm truncate flex items-center gap-2">
                     {savedGroups.find(g => g.id === groupId)?.groupName || `Group ${groupId}`}
+                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full font-normal">
+                      {savedGroups.find(g => g.id === groupId)?.currency || 'USD'}
+                    </span>
                   </span>
                   <ChevronDown className="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-slate-400" />
                 </button>
@@ -913,11 +952,14 @@ Let's settle up! 💸`;
                           onClick={() => switchGroup(group.id)}
                         >
                           <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-medium truncate ${
-                              group.id === groupId ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-slate-100'
-                            }`}>
-                              {group.groupName || `Group ${group.id}`}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className={`text-sm font-medium truncate ${
+                                group.id === groupId ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-slate-100'
+                              }`}>
+                                {group.groupName || `Group ${group.id}`}
+                              </p>
+                              <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">{group.currency || 'USD'}</span>
+                            </div>
                             <p className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate">
                               {group.id}
                             </p>
@@ -1046,10 +1088,10 @@ Let's settle up! 💸`;
                 className="w-full px-4 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:border-gray-400"
               />
               <input
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={expenseAmount}
-                onChange={(e) => setExpenseAmount(e.target.value)}
+                onChange={handleAmountChange}
                 placeholder={getText('amount')}
                 className="w-full px-4 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:border-gray-400"
               />
@@ -1102,7 +1144,7 @@ Let's settle up! 💸`;
                   <div key={expense.id} className="flex justify-between items-start py-4 border-b border-gray-100 dark:border-gray-700">
                     <div>
                       <p className="text-gray-900 dark:text-white mb-1">{expense.description}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">${expense.amount.toFixed(2)} · {payerName}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{formatAmount(expense.amount, groupCurrency)} · {payerName}</p>
                       {expense.addedBy && (
                         <p className="text-xs text-gray-400 mt-1">{getText('addedBy', { name: expense.addedBy })}</p>
                       )}
@@ -1139,7 +1181,7 @@ Let's settle up! 💸`;
                     </span>
                     <div className="flex items-center gap-3">
                       <span className={balance > 0 ? 'text-gray-900 dark:text-white' : balance < 0 ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}>
-                        {balance > 0 ? `+$${balance.toFixed(2)}` : balance < 0 ? `-$${Math.abs(balance).toFixed(2)}` : '$0.00'}
+                        {balance > 0 ? `+${formatAmount(balance, groupCurrency)}` : formatAmount(balance, groupCurrency)}
                       </span>
                       {balance < 0 && (
                         <button
@@ -1187,7 +1229,7 @@ Let's settle up! 💸`;
                 return (
                   <div key={idx} className={`py-3 pl-4 ${isRTL ? 'border-r-2' : 'border-l-2'} border-gray-900 dark:border-gray-500`}>
                     <p className="text-gray-900 dark:text-white">
-                      {fromName} <span className="text-gray-400">{getText('pays')}</span> {toName} <span className="text-gray-900 dark:text-white font-medium">${settlement.amount.toFixed(2)}</span>
+                      {fromName} <span className="text-gray-400">{getText('pays')}</span> {toName} <span className="text-gray-900 dark:text-white font-medium">{formatAmount(settlement.amount, groupCurrency)}</span>
                     </p>
                   </div>
                 );
@@ -1227,6 +1269,23 @@ Let's settle up! 💸`;
                   }
                 }}
               />
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {getText('currency')}
+              </label>
+              <select
+                value={modalCurrency}
+                onChange={(e) => setModalCurrency(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CURRENCIES.map(c => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} ({c.symbol}) - {language === 'ar' ? c.name_ar : c.name_en}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="flex justify-end gap-3">
