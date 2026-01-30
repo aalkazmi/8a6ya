@@ -6,7 +6,8 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { Moon, Sun } from 'lucide-react';
 import { db } from './lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { touchDeviceDoc, addGroupToDevice } from './lib/device';
 
 export default function HomePage() {
   const router = useRouter();
@@ -83,12 +84,32 @@ export default function HomePage() {
 
     try {
       const groupId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const groupName = `${userName.trim()}'s Group`;
+      const currency = 'USD';
 
+      // 1. Create group metadata
+      await setDoc(doc(db, 'groups', groupId), {
+        code: groupId,
+        name: groupName,
+        currency: currency,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Initialize storage for dashboard
       await setDoc(doc(db, 'storage', `group-${groupId}-people`), {
         value: [{ id: Date.now().toString(), name: userName.trim() }]
       });
       await setDoc(doc(db, 'storage', `group-${groupId}-expenses`), {
         value: []
+      });
+
+      // 3. Update device history
+      await touchDeviceDoc(db);
+      await addGroupToDevice(db, {
+        groupCode: groupId,
+        groupName: groupName,
+        currency: currency
       });
 
       localStorage.setItem('currentGroupId', groupId);
@@ -113,12 +134,27 @@ export default function HomePage() {
 
     try {
       const groupId = groupCodeInput.trim().toUpperCase();
-      const peopleDoc = await getDoc(doc(db, 'storage', `group-${groupId}-people`));
+      
+      // 1. Validate group exists via groups collection
+      const groupDoc = await getDoc(doc(db, 'groups', groupId));
 
-      if (!peopleDoc.exists()) {
+      if (!groupDoc.exists()) {
         setMessage('Group not found');
         return;
       }
+
+      const groupData = groupDoc.data();
+
+      // 2. Update device history
+      await touchDeviceDoc(db);
+      await addGroupToDevice(db, {
+        groupCode: groupId,
+        groupName: groupData.name || `Group ${groupId}`,
+        currency: groupData.currency || 'USD'
+      });
+
+      // 3. Add user to storage (dashboard logic)
+      const peopleDoc = await getDoc(doc(db, 'storage', `group-${groupId}-people`));
 
       const existingPeople = peopleDoc.data().value || [];
       const alreadyExists = existingPeople.some(

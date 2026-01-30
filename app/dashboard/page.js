@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun } from 'lucide-react';
+import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/firebase';
 import{
@@ -14,8 +14,10 @@ import{
   query,
   where,
   getDocs,
-  arrayUnion
+  arrayUnion,
+  serverTimestamp
 } from 'firebase/firestore';
+import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFromDevice } from '../lib/device';
 export default function ExpenseSplitter() {
   const router = useRouter();
   const [initializing, setInitializing] = useState(true);
@@ -26,6 +28,16 @@ export default function ExpenseSplitter() {
   const [isJoining, setIsJoining] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sharedPersonId, setSharedPersonId] = useState(null);
+  const [savedGroups, setSavedGroups] = useState([]);
+  const [isGroupMenuOpen, setIsGroupMenuOpen] = useState(false);
+  
+  // Modal State
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [modalGroupName, setModalGroupName] = useState('');
+  const [modalJoinCode, setModalJoinCode] = useState('');
+  const [modalError, setModalError] = useState('');
+  const [modalLoading, setModalLoading] = useState(false);
   
   const [people, setPeople] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -80,6 +92,195 @@ export default function ExpenseSplitter() {
       unsubExpenses();
     };
   }, [groupId]);
+
+  // Listen to device groups
+  useEffect(() => {
+    const unsubscribe = listenToDeviceGroups(db, setSavedGroups);
+    return () => unsubscribe();
+  }, []);
+
+  // Backfill device membership for current group (Debug & Fix)
+  useEffect(() => {
+    const syncGroupToDevice = async () => {
+      if (!groupId) return;
+
+      console.log('Starting backfill for group:', groupId);
+
+      try {
+        // 1. Get or create Device ID
+        let deviceId = localStorage.getItem('a6ya_device_id');
+        if (!deviceId) {
+          if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            deviceId = crypto.randomUUID();
+          } else {
+            deviceId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+          }
+          localStorage.setItem('a6ya_device_id', deviceId);
+          console.log('Created new device ID:', deviceId);
+        } else {
+          console.log('Using existing device ID:', deviceId);
+        }
+
+        // 2. Fetch Group Metadata
+        const groupDoc = await getDoc(doc(db, 'groups', groupId));
+        let groupName = `Group ${groupId}`;
+        let currency = 'USD';
+
+        if (groupDoc.exists()) {
+          const data = groupDoc.data();
+          groupName = data.name || groupName;
+          currency = data.currency || currency;
+        } else {
+          console.warn('Group metadata not found for:', groupId);
+        }
+
+        // 3. Write Membership directly
+        const membershipRef = doc(db, 'devices', deviceId, 'groups', groupId);
+        const membershipSnap = await getDoc(membershipRef);
+        
+        const updateData = {
+          groupCode: groupId,
+          groupName: groupName,
+          currency: currency,
+          lastOpenedAt: serverTimestamp()
+        };
+
+        if (!membershipSnap.exists()) {
+          updateData.joinedAt = serverTimestamp();
+        }
+
+        await setDoc(membershipRef, updateData, { merge: true });
+        console.log('Successfully backfilled membership for:', groupId);
+
+      } catch (error) {
+        console.error('Error backfilling group to device:', error);
+      }
+    };
+
+    syncGroupToDevice();
+  }, [groupId]);
+
+  // Handle Escape key for modals
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') closeModals();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
+  const switchGroup = (groupCode) => {
+    if (groupCode !== groupId) {
+      setGroupId(groupCode);
+      localStorage.setItem('currentGroupId', groupCode);
+    }
+    setIsGroupMenuOpen(false);
+  };
+
+  const closeModals = () => {
+    setShowCreateModal(false);
+    setShowJoinModal(false);
+    setModalGroupName('');
+    setModalJoinCode('');
+    setModalError('');
+    setModalLoading(false);
+  };
+
+  const handleCreateGroup = async () => {
+    setModalLoading(true);
+    setModalError('');
+    try {
+      const newGroupId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const groupName = modalGroupName.trim() || `${userName.trim()}'s Group`;
+      const currency = 'USD';
+      const initialPerson = { id: Date.now().toString(), name: userName.trim() };
+
+      // 1. Create group metadata
+      await setDoc(doc(db, 'groups', newGroupId), {
+        code: newGroupId,
+        name: groupName,
+        currency: currency,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Initialize storage
+      await setDoc(doc(db, 'storage', `group-${newGroupId}-people`), { value: [initialPerson] });
+      await setDoc(doc(db, 'storage', `group-${newGroupId}-expenses`), { value: [] });
+
+      // 3. Update device history
+      await touchDeviceDoc(db);
+      await addGroupToDevice(db, {
+        groupCode: newGroupId,
+        groupName: groupName,
+        currency: currency
+      });
+
+      switchGroup(newGroupId);
+      closeModals();
+      setMessage(getText('groupCreated', { code: newGroupId }));
+      setTimeout(() => setMessage(''), 5000);
+    } catch (error) {
+      console.error('Error creating group:', error);
+      setModalError('Failed to create group');
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleJoinGroup = async () => {
+    if (modalJoinCode.length !== 6) {
+      setModalError('Code must be 6 characters');
+      return;
+    }
+    setModalLoading(true);
+    setModalError('');
+
+    try {
+      const code = modalJoinCode.toUpperCase();
+      const groupDoc = await getDoc(doc(db, 'groups', code));
+
+      if (!groupDoc.exists()) {
+        setModalError('Group not found');
+        setModalLoading(false);
+        return;
+      }
+
+      const groupData = groupDoc.data();
+      const groupName = groupData.name || `Group ${code}`;
+      const currency = groupData.currency || 'USD';
+
+      // Add user to people list if needed
+      const peopleRef = doc(db, 'storage', `group-${code}-people`);
+      const peopleDoc = await getDoc(peopleRef);
+      
+      if (peopleDoc.exists()) {
+        const existingPeople = peopleDoc.data().value || [];
+        const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
+        
+        if (!nameExists) {
+          await updateDoc(peopleRef, {
+            value: arrayUnion({ id: Date.now().toString(), name: userName.trim() })
+          });
+        }
+      }
+
+      await touchDeviceDoc(db);
+      await addGroupToDevice(db, {
+        groupCode: code,
+        groupName: groupName,
+        currency: currency
+      });
+
+      switchGroup(code);
+      closeModals();
+    } catch (error) {
+      console.error('Error joining group:', error);
+      setModalError('Failed to join group');
+    } finally {
+      setModalLoading(false);
+    }
+  };
 
   const toggleTheme = () => {
     if (isDark) {
@@ -222,7 +423,9 @@ Let's settle up! 💸`;
       return;
     }
     const newGroupId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const initialPerson = { id: Date.now(), name: userName.trim() };
+    const groupName = `${userName.trim()}'s Group`;
+    const currency = 'USD';
+    const initialPerson = { id: Date.now().toString(), name: userName.trim() };
     const initialPeople = [initialPerson];
     
       try {
@@ -230,8 +433,24 @@ Let's settle up! 💸`;
       if (typeof window !== 'undefined') {
         localStorage.setItem('currentGroupId', newGroupId);
         localStorage.setItem('currentUserName', userName.trim());
+        
+        await setDoc(doc(db, 'groups', newGroupId), {
+          code: newGroupId,
+          name: groupName,
+          currency: currency,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
         await setDoc(doc(db, 'storage', `group-${newGroupId}-people`), { value: initialPeople });
         await setDoc(doc(db, 'storage', `group-${newGroupId}-expenses`), { value: [] });
+
+        await touchDeviceDoc(db);
+        await addGroupToDevice(db, {
+          groupCode: newGroupId,
+          groupName: groupName,
+          currency: currency
+        });
       }
       setMessage(getText('groupCreated', { code: newGroupId }));
       setTimeout(() => setMessage(''), 5000);
@@ -252,6 +471,16 @@ Let's settle up! 💸`;
     
         if (typeof window !== 'undefined') {
         try {
+          const groupDoc = await getDoc(doc(db, 'groups', code));
+          let groupName = `Group ${code}`;
+          let currency = 'USD';
+
+          if (groupDoc.exists()) {
+            const data = groupDoc.data();
+            groupName = data.name || groupName;
+            currency = data.currency || currency;
+          }
+
           const peopleDoc = await getDoc(doc(db, 'storage', `group-${code}-people`));
           
           if (!peopleDoc.exists()) {
@@ -264,10 +493,16 @@ Let's settle up! 💸`;
           const nameExists = existingPeople.some(p => p.name.toLowerCase() === userName.trim().toLowerCase());
           
           if (!nameExists) {
-            const newPerson = { id: Date.now(), name: userName.trim() };
-            const updatedPeople = [...existingPeople, newPerson];
+            const newPerson = { id: Date.now().toString(), name: userName.trim() };
             await updateDoc(doc(db, 'storage', `group-${code}-people`), { value: arrayUnion(newPerson) });
           }
+
+          await touchDeviceDoc(db);
+          await addGroupToDevice(db, {
+            groupCode: code,
+            groupName: groupName,
+            currency: currency
+          });
 
           localStorage.setItem('currentGroupId', code);
           localStorage.setItem('currentUserName', userName.trim());
@@ -287,13 +522,21 @@ Let's settle up! 💸`;
       if (updatedPeople.length > 0) {
         await setDoc(doc(db, 'storage', `group-${groupId}-people`), { value: updatedPeople });
       }
-      localStorage.removeItem('currentGroupId');
-      localStorage.removeItem('currentUserName');
+      
+      await removeGroupFromDevice(db, groupId);
+
+      const remainingGroups = savedGroups.filter(g => g.id !== groupId);
+
+      if (remainingGroups.length > 0) {
+        switchGroup(remainingGroups[0].id);
+      } else {
+        localStorage.removeItem('currentGroupId');
+        localStorage.removeItem('currentUserName');
+        router.push('/');
+      }
     } catch (error) {
       console.error('Error leaving group in Firestore:', error);
     }
-
-    router.push('/');
   };
 
   const copyGroupCode = () => {
@@ -571,13 +814,86 @@ Let's settle up! 💸`;
               >
                 {language === 'en' ? 'العربية' : 'English'}
               </button>
-              <button
-                onClick={copyGroupCode}
-                className="flex items-center gap-2 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-slate-100 px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition max-w-[160px] sm:max-w-none"
-              >
-                {copied ? <Check className="w-4 h-4 flex-shrink-0" /> : <Copy className="w-4 h-4 flex-shrink-0" />}
-                <span className="font-mono text-sm truncate">{groupId}</span>
-              </button>
+              
+              <div className="relative">
+                <button
+                  onClick={() => setIsGroupMenuOpen(!isGroupMenuOpen)}
+                  className="flex items-center gap-2 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-slate-100 px-4 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition max-w-[200px] sm:max-w-xs"
+                >
+                  <span className="font-medium text-sm truncate">
+                    {savedGroups.find(g => g.id === groupId)?.groupName || `Group ${groupId}`}
+                  </span>
+                  <ChevronDown className="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-slate-400" />
+                </button>
+
+                {isGroupMenuOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-[min(90vw,320px)] bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
+                    <div className="max-h-[60vh] overflow-y-auto py-1">
+                      {savedGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          className={`px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition cursor-pointer ${
+                            group.id === groupId ? 'bg-blue-50 dark:bg-slate-800/50' : ''
+                          }`}
+                          onClick={() => switchGroup(group.id)}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium truncate ${
+                              group.id === groupId ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-slate-100'
+                            }`}>
+                              {group.groupName || `Group ${group.id}`}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate">
+                              {group.id}
+                            </p>
+                          </div>
+                          {group.id === groupId && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyGroupCode();
+                              }}
+                              className="p-2 text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
+                            >
+                              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {savedGroups.length === 0 && (
+                        <div className="px-4 py-3 text-sm text-gray-500 dark:text-slate-400">
+                          No saved groups
+                        </div>
+                      )}
+
+                      <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+
+                      <button
+                        onClick={() => {
+                          setIsGroupMenuOpen(false);
+                          setShowCreateModal(true);
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition cursor-pointer text-left"
+                      >
+                        <PlusCircle className="w-4 h-4 text-gray-500 dark:text-slate-400" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">Create new group</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setIsGroupMenuOpen(false);
+                          setShowJoinModal(true);
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition cursor-pointer text-left"
+                      >
+                        <Users className="w-4 h-4 text-gray-500 dark:text-slate-400" />
+                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">Join group</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={leaveGroup}
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 hover:text-gray-900 hover:bg-gray-50 dark:hover:text-white dark:hover:bg-slate-800 transition"
@@ -792,6 +1108,99 @@ Let's settle up! 💸`;
           </div>
         )}
       </div>
+
+      {/* Create Group Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeModals}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Create new group</h2>
+            
+            {modalError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-400 rounded-md">
+                {modalError}
+              </div>
+            )}
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Group Name (Optional)
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={modalGroupName}
+                onChange={(e) => setModalGroupName(e.target.value)}
+                placeholder={`${userName}'s Group`}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closeModals}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateGroup}
+                disabled={modalLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
+              >
+                {modalLoading ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Join Group Modal */}
+      {showJoinModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeModals}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Join group</h2>
+            
+            {modalError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-400 rounded-md">
+                {modalError}
+              </div>
+            )}
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Group Code
+              </label>
+              <input
+                type="text"
+                autoFocus
+                maxLength={6}
+                value={modalJoinCode}
+                onChange={(e) => setModalJoinCode(e.target.value.toUpperCase())}
+                placeholder="XY7Z9A"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase tracking-widest text-center font-mono text-lg"
+                onKeyDown={(e) => e.key === 'Enter' && handleJoinGroup()}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closeModals}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleJoinGroup}
+                disabled={modalLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
+              >
+                {modalLoading ? 'Joining...' : 'Join'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
