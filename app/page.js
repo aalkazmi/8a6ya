@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Moon, Sun } from 'lucide-react';
 import { db } from './lib/firebase';
 import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
-import { touchDeviceDoc, addGroupToDevice } from './lib/device';
+import { touchDeviceDoc, addGroupToDevice, listenToDeviceGroups } from './lib/device';
 
 export default function HomePage() {
   const router = useRouter();
@@ -18,10 +18,22 @@ export default function HomePage() {
   const [groupCodeInput, setGroupCodeInput] = useState('');
   const [language, setLanguage] = useState('en');
   const [message, setMessage] = useState('');
+  const [checkingGroups, setCheckingGroups] = useState(true);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = listenToDeviceGroups(db, (groups) => {
+      if (groups.length > 0) {
+        router.push('/dashboard');
+      } else {
+        setCheckingGroups(false);
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
 
   const toggleTheme = () => {
     if (isDark) {
@@ -176,6 +188,14 @@ export default function HomePage() {
       setMessage('Failed to join group');
     }
   };
+
+  if (checkingGroups) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-gray-300 dark:border-gray-700 border-t-gray-900 dark:border-t-white rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6 flex items-center justify-center transition-colors">

@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown } from 'lucide-react';
+import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown, Edit2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/firebase';
 import{
@@ -38,6 +38,13 @@ export default function ExpenseSplitter() {
   const [modalJoinCode, setModalJoinCode] = useState('');
   const [modalError, setModalError] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
+
+  // Rename Modal State
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameGroupId, setRenameGroupId] = useState(null);
+  const [renameGroupName, setRenameGroupName] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
   
   const [people, setPeople] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -184,6 +191,11 @@ export default function ExpenseSplitter() {
     setModalJoinCode('');
     setModalError('');
     setModalLoading(false);
+    setShowRenameModal(false);
+    setRenameGroupId(null);
+    setRenameGroupName('');
+    setRenameError('');
+    setRenameLoading(false);
   };
 
   const handleCreateGroup = async () => {
@@ -282,6 +294,46 @@ export default function ExpenseSplitter() {
     }
   };
 
+  const handleRenameGroup = async () => {
+    const name = renameGroupName.trim();
+    if (!name) {
+      setRenameError(getText('nameRequired'));
+      return;
+    }
+    if (name.length > 40) {
+      setRenameError(getText('nameTooLong'));
+      return;
+    }
+
+    setRenameLoading(true);
+    setRenameError('');
+
+    try {
+      const deviceId = localStorage.getItem('a6ya_device_id');
+
+      // 1. Update global group doc
+      await updateDoc(doc(db, 'groups', renameGroupId), {
+        name: name,
+        updatedAt: serverTimestamp(),
+        lastDeviceId: deviceId
+      });
+
+      // 2. Update device membership doc (so dropdown updates immediately)
+      if (deviceId) {
+        await updateDoc(doc(db, 'devices', deviceId, 'groups', renameGroupId), {
+          groupName: name
+        });
+      }
+
+      closeModals();
+    } catch (error) {
+      console.error('Error renaming group:', error);
+      setRenameError('Failed to update group name');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
   const toggleTheme = () => {
     if (isDark) {
       document.documentElement.classList.remove('dark');
@@ -312,6 +364,7 @@ export default function ExpenseSplitter() {
       yourName: 'Your Name',
       enterName: 'Enter your name',
       createGroup: 'Create Group',
+      createNewGroup: 'Create new group',
       joinGroup: 'Join Group',
       groupCode: 'GROUP CODE',
       join: 'Join',
@@ -339,6 +392,12 @@ export default function ExpenseSplitter() {
       groupCreated: 'Group created: {{code}}',
       settleUp: 'Settle up',
       copied: 'Copied!',
+      editGroupName: 'Edit group name',
+      groupName: 'Group name',
+      save: 'Save',
+      cancel: 'Cancel',
+      nameRequired: 'Name is required',
+      nameTooLong: 'Name is too long (max 40 characters)',
     },
     ar: {
       appName: '8a6ya',
@@ -346,7 +405,8 @@ export default function ExpenseSplitter() {
       yourName: 'اسمك',
       enterName: 'أدخل اسمك',
       createGroup: 'إنشاء مجموعة',
-      joinGroup: 'الانضمام لمجموعة',
+      createNewGroup: 'إنشاء مجموعة جديدة',
+      joinGroup: 'الانضمام إلى مجموعة',
       groupCode: 'رمز المجموعة',
       join: 'انضم',
       back: 'رجوع',
@@ -373,6 +433,12 @@ export default function ExpenseSplitter() {
       groupCreated: 'تم إنشاء المجموعة: {{code}}',
       settleUp: 'تصفية الحساب',
       copied: 'تم النسخ!',
+      editGroupName: 'تعديل اسم المجموعة',
+      groupName: 'اسم المجموعة',
+      save: 'حفظ',
+      cancel: 'إلغاء',
+      nameRequired: 'الاسم مطلوب',
+      nameTooLong: 'الاسم طويل جداً',
     }
   };
 
@@ -847,17 +913,30 @@ Let's settle up! 💸`;
                               {group.id}
                             </p>
                           </div>
-                          {group.id === groupId && (
-                            <button
+                          <div className="flex items-center gap-1">
+                            {group.id === groupId && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyGroupCode();
+                                }}
+                                className="p-2 text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
+                              >
+                                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                              </button>
+                            )}
+                            <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                copyGroupCode();
+                                setRenameGroupId(group.id);
+                                setRenameGroupName(group.groupName || '');
+                                setShowRenameModal(true);
                               }}
                               className="p-2 text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200"
                             >
-                              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                          )}
+                          </div>
                         </div>
                       ))}
                       {savedGroups.length === 0 && (
@@ -876,7 +955,7 @@ Let's settle up! 💸`;
                         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition cursor-pointer text-left"
                       >
                         <PlusCircle className="w-4 h-4 text-gray-500 dark:text-slate-400" />
-                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">Create new group</span>
+                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">{getText('createNewGroup')}</span>
                       </button>
 
                       <button
@@ -887,7 +966,7 @@ Let's settle up! 💸`;
                         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition cursor-pointer text-left"
                       >
                         <Users className="w-4 h-4 text-gray-500 dark:text-slate-400" />
-                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">Join group</span>
+                        <span className="text-sm font-medium text-gray-900 dark:text-slate-100">{getText('joinGroup')}</span>
                       </button>
                     </div>
                   </div>
@@ -1196,6 +1275,55 @@ Let's settle up! 💸`;
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
               >
                 {modalLoading ? 'Joining...' : 'Join'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Group Modal */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeModals}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">{getText('editGroupName')}</h2>
+            
+            {renameError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-sm text-red-600 dark:text-red-400 rounded-md">
+                {renameError}
+              </div>
+            )}
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {getText('groupName')}
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={renameGroupName}
+                onChange={(e) => setRenameGroupName(e.target.value)}
+                placeholder={getText('groupName')}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onKeyDown={(e) => e.key === 'Enter' && handleRenameGroup()}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
+                {renameGroupName.length}/40
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closeModals}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
+              >
+                {getText('cancel')}
+              </button>
+              <button
+                onClick={handleRenameGroup}
+                disabled={renameLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
+              >
+                {renameLoading ? '...' : getText('save')}
               </button>
             </div>
           </div>
