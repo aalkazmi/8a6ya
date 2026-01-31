@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown, Edit2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '../lib/firebase';
@@ -19,7 +19,7 @@ import{
 } from 'firebase/firestore';
 import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFromDevice } from '../lib/device';
 import { CURRENCIES, getDefaultCurrency, formatAmount, getCurrencyByCode } from '../lib/currencies';
-export default function ExpenseSplitter() {
+function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initializing, setInitializing] = useState(true);
@@ -1486,5 +1486,15 @@ ${getText('settleUpCTA')}`;
         </div>
       )}
     </div>
+  );
+}
+
+export default function ExpenseSplitter() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="w-8 h-8 border-4 border-gray-300 dark:border-gray-700 border-t-gray-900 dark:border-t-white rounded-full animate-spin"></div>
+    </div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
