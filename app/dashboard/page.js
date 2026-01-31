@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown, Edit2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { db } from '../../lib/firebase';
+import { db } from '../lib/firebase';
 import{
   collection,
   doc,
@@ -17,8 +17,8 @@ import{
   arrayUnion,
   serverTimestamp
 } from 'firebase/firestore';
-import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFromDevice } from '../../lib/device';
-import { CURRENCIES, getDefaultCurrency, formatAmount, getCurrencyByCode } from '../../lib/currencies';
+import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFromDevice } from '../lib/device';
+import { CURRENCIES, getDefaultCurrency, formatAmount, getCurrencyByCode } from '../lib/currencies';
 export default function ExpenseSplitter() {
   const router = useRouter();
   const searchParams = useSearchParams();
