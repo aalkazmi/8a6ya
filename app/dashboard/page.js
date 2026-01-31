@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { PlusCircle, Trash2, Users, DollarSign, Share2, Copy, Check, RefreshCw, Moon, Sun, ChevronDown, Edit2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '../lib/firebase';
 import{
   collection,
@@ -21,6 +21,7 @@ import { listenToDeviceGroups, touchDeviceDoc, addGroupToDevice, removeGroupFrom
 import { CURRENCIES, getDefaultCurrency, formatAmount, getCurrencyByCode } from '../lib/currencies';
 export default function ExpenseSplitter() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [initializing, setInitializing] = useState(true);
   const [groupId, setGroupId] = useState(null);
   const [isDark, setIsDark] = useState(false);
@@ -65,6 +66,15 @@ export default function ExpenseSplitter() {
       try {
         if (typeof window === 'undefined') return;
 
+        // Hydrate from URL params if present (Handover from Welcome page)
+        const paramGid = searchParams.get('gid');
+        const paramUname = searchParams.get('uname');
+        if (paramGid) localStorage.setItem('currentGroupId', paramGid);
+        if (paramUname) localStorage.setItem('currentUserName', paramUname);
+        if (paramGid || paramUname) {
+          router.replace('/dashboard');
+        }
+
         const savedGroupId = localStorage.getItem('currentGroupId');
         const languageDoc = await getDoc(doc(db, 'storage', 'language'));
         const savedLanguage = languageDoc.exists() ? languageDoc.data().value : 'en';
@@ -108,6 +118,56 @@ export default function ExpenseSplitter() {
     const unsubscribe = listenToDeviceGroups(db, setSavedGroups);
     return () => unsubscribe();
   }, []);
+
+  // DEBUG: Audit Rules - Temporary instrumentation
+  useEffect(() => {
+    const DEBUG_RULES_AUDIT = false; // TOGGLE TO TRUE TO AUDIT
+    if (!DEBUG_RULES_AUDIT || !groupId) return;
+
+    const audit = async () => {
+      console.log('--- START FIRESTORE AUDIT ---');
+      try {
+        // 1. Group Doc
+        const groupSnap = await getDoc(doc(db, 'groups', groupId));
+        if (groupSnap.exists()) {
+          console.log(`[AUDIT] groups/${groupId} keys:`, Object.keys(groupSnap.data()));
+        }
+
+        // 2. People Doc
+        const peopleSnap = await getDoc(doc(db, 'storage', `group-${groupId}-people`));
+        if (peopleSnap.exists()) {
+          const data = peopleSnap.data();
+          console.log(`[AUDIT] storage/group-${groupId}-people keys:`, Object.keys(data));
+          if (Array.isArray(data.value) && data.value.length > 0) {
+            console.log('[AUDIT] People item keys:', Object.keys(data.value[0]));
+          }
+        }
+
+        // 3. Expenses Doc
+        const expensesSnap = await getDoc(doc(db, 'storage', `group-${groupId}-expenses`));
+        if (expensesSnap.exists()) {
+          const data = expensesSnap.data();
+          console.log(`[AUDIT] storage/group-${groupId}-expenses keys:`, Object.keys(data));
+          if (Array.isArray(data.value) && data.value.length > 0) {
+            console.log('[AUDIT] Expense item keys:', Object.keys(data.value[0]));
+          }
+        }
+
+        // 4. Device Doc
+        const deviceId = localStorage.getItem('a6ya_device_id');
+        if (deviceId) {
+          const memSnap = await getDoc(doc(db, 'devices', deviceId, 'groups', groupId));
+          if (memSnap.exists()) {
+            console.log(`[AUDIT] devices/${deviceId}/groups/${groupId} keys:`, Object.keys(memSnap.data()));
+          }
+        }
+      } catch (e) {
+        console.error('[AUDIT] Failed:', e);
+      }
+      console.log('--- END FIRESTORE AUDIT ---');
+    };
+    audit();
+  }, [groupId]);
 
   // Backfill device membership for current group (Debug & Fix)
   useEffect(() => {
@@ -211,7 +271,7 @@ export default function ExpenseSplitter() {
   };
 
   const handleCreateGroup = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+    if (e) e.preventDefault();
 
     setModalLoading(true);
     setModalError('');
@@ -255,7 +315,8 @@ export default function ExpenseSplitter() {
     }
   };
 
-  const handleJoinGroup = async () => {
+  const handleJoinGroup = async (e) => {
+    if (e) e.preventDefault();
     if (modalJoinCode.length !== 6) {
       setModalError('Code must be 6 characters');
       return;
@@ -309,7 +370,8 @@ export default function ExpenseSplitter() {
     }
   };
 
-  const handleRenameGroup = async () => {
+  const handleRenameGroup = async (e) => {
+    if (e) e.preventDefault();
     const name = renameGroupName.trim();
     if (!name) {
       setRenameError(getText('nameRequired'));
@@ -1050,7 +1112,12 @@ ${getText('settleUpCTA')}`;
               type="text"
               value={newPersonName}
               onChange={(e) => setNewPersonName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addPerson()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addPerson();
+                }
+              }}
               placeholder={getText('addPerson')}
               className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:border-gray-400 transition"
             />
@@ -1265,7 +1332,7 @@ ${getText('settleUpCTA')}`;
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    handleCreateGroup();
+                    handleCreateGroup(e);
                   }
                 }}
               />
@@ -1333,18 +1400,25 @@ ${getText('settleUpCTA')}`;
                 onChange={(e) => setModalJoinCode(e.target.value.toUpperCase())}
                 placeholder="XY7Z9A"
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase tracking-widest text-center font-mono text-lg"
-                onKeyDown={(e) => e.key === 'Enter' && handleJoinGroup()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleJoinGroup(e);
+                  }
+                }}
               />
             </div>
 
             <div className="flex justify-end gap-3">
               <button
+                type="button"
                 onClick={closeModals}
                 className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleJoinGroup}
                 disabled={modalLoading}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"
@@ -1379,7 +1453,12 @@ ${getText('settleUpCTA')}`;
                 onChange={(e) => setRenameGroupName(e.target.value)}
                 placeholder={getText('groupName')}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                onKeyDown={(e) => e.key === 'Enter' && handleRenameGroup()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRenameGroup(e);
+                  }
+                }}
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
                 {renameGroupName.length}/40
@@ -1388,12 +1467,14 @@ ${getText('settleUpCTA')}`;
 
             <div className="flex justify-end gap-3">
               <button
+                type="button"
                 onClick={closeModals}
                 className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition"
               >
                 {getText('cancel')}
               </button>
               <button
+                type="button"
                 onClick={handleRenameGroup}
                 disabled={renameLoading}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition disabled:opacity-50"

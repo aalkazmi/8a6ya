@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
@@ -11,6 +11,7 @@ import { touchDeviceDoc, addGroupToDevice, listenToDeviceGroups } from './lib/de
 
 export default function HomePage() {
   const router = useRouter();
+  const isNavigatingRef = useRef(false);
 
   const [isDark, setIsDark] = useState(false);
   const [userName, setUserName] = useState('');
@@ -26,11 +27,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const unsubscribe = listenToDeviceGroups(db, (groups) => {
-      if (groups.length > 0) {
-        router.push('/dashboard');
-      } else {
-        setCheckingGroups(false);
-      }
+      setCheckingGroups(false);
     });
     return () => unsubscribe();
   }, [router]);
@@ -88,13 +85,17 @@ export default function HomePage() {
     setLanguage(lang);
   };
 
-  const createGroup = async () => {
+  const createGroup = async (e) => {
+    if (e) e.preventDefault();
+    if (isNavigatingRef.current) return;
+
     if (!userName.trim()) {
       setMessage(language === 'en' ? 'Please enter your name' : 'الرجاء إدخال اسمك');
       return;
     }
 
     try {
+      isNavigatingRef.current = true;
       const groupId = Math.random().toString(36).substring(2, 8).toUpperCase();
       const groupName = `${userName.trim()}'s Group`;
       const currency = 'USD';
@@ -127,14 +128,21 @@ export default function HomePage() {
       localStorage.setItem('currentGroupId', groupId);
       localStorage.setItem('currentUserName', userName.trim());
 
-      router.push('/dashboard');
+      const gid = encodeURIComponent(groupId);
+      const uname = encodeURIComponent(userName.trim());
+      window.location.assign(`/dashboard?gid=${gid}&uname=${uname}`);
+      return;
     } catch (error) {
+      isNavigatingRef.current = false;
       console.error('Error creating group:', error);
       setMessage('Failed to create group');
     }
   };
 
-  const joinGroup = async () => {
+  const joinGroup = async (e) => {
+    if (e) e.preventDefault();
+    if (isNavigatingRef.current) return;
+
     if (!userName.trim()) {
       setMessage(language === 'en' ? 'Please enter your name' : 'الرجاء إدخال اسمك');
       return;
@@ -145,6 +153,7 @@ export default function HomePage() {
     }
 
     try {
+      isNavigatingRef.current = true;
       const groupId = groupCodeInput.trim().toUpperCase();
       
       // 1. Validate group exists via groups collection
@@ -152,6 +161,7 @@ export default function HomePage() {
 
       if (!groupDoc.exists()) {
         setMessage('Group not found');
+        isNavigatingRef.current = false;
         return;
       }
 
@@ -182,8 +192,12 @@ export default function HomePage() {
       localStorage.setItem('currentGroupId', groupId);
       localStorage.setItem('currentUserName', userName.trim());
 
-      router.push('/dashboard');
+      const gid = encodeURIComponent(groupId);
+      const uname = encodeURIComponent(userName.trim());
+      window.location.assign(`/dashboard?gid=${gid}&uname=${uname}`);
+      return;
     } catch (error) {
+      isNavigatingRef.current = false;
       console.error('Error joining group:', error);
       setMessage('Failed to join group');
     }
@@ -216,6 +230,7 @@ export default function HomePage() {
             </label>
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={() => changeLanguage('en')}
                 className={`flex-1 py-2 text-sm transition ${
                   language === 'en'
@@ -226,6 +241,7 @@ export default function HomePage() {
                 English
               </button>
               <button
+                type="button"
                 onClick={() => changeLanguage('ar')}
                 className={`flex-1 py-2 text-sm transition ${
                   language === 'ar'
@@ -246,6 +262,12 @@ export default function HomePage() {
               type="text"
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (!isJoining) createGroup(e);
+                }
+              }}
               placeholder={getText('enterName')}
               className="w-full px-4 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:border-gray-400 transition"
               dir={language === 'ar' ? 'rtl' : 'ltr'}
@@ -255,12 +277,14 @@ export default function HomePage() {
           {!isJoining ? (
             <div className="space-y-3">
               <button
+                type="button"
                 onClick={createGroup}
                 className="w-full bg-gray-900 dark:bg-blue-600 text-white py-3 hover:bg-gray-800 dark:hover:bg-blue-700 transition text-sm tracking-wide"
               >
                 {getText('createGroup')}
               </button>
               <button
+                type="button"
                 onClick={() => setIsJoining(true)}
                 className="w-full border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition text-sm tracking-wide"
               >
@@ -273,17 +297,25 @@ export default function HomePage() {
                 type="text"
                 value={groupCodeInput}
                 onChange={(e) => setGroupCodeInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    joinGroup(e);
+                  }
+                }}
                 placeholder={getText('groupCode')}
                 maxLength={6}
                 className="w-full px-4 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:border-gray-400 uppercase text-center tracking-widest"
               />
               <button
+                type="button"
                 onClick={joinGroup}
                 className="w-full bg-gray-900 dark:bg-blue-600 text-white py-3 hover:bg-gray-800 dark:hover:bg-blue-700 transition text-sm tracking-wide"
               >
                 {getText('join')}
               </button>
               <button
+                type="button"
                 onClick={() => setIsJoining(false)}
                 className="w-full text-gray-500 dark:text-gray-400 py-2 hover:text-gray-900 dark:hover:text-white transition text-sm"
               >
